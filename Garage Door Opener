@@ -1,0 +1,202 @@
+########
+# This file combines the other files together
+###########
+
+#Grab all libraries
+import RPi.GPIO as GPIO
+from picamera import PiCamera
+import time
+from time import sleep
+
+import smtplib
+import datetime
+import glob
+# define os as global here else
+# we can't use it in that other function
+global os
+import os
+from email.MIMEMultipart import MIMEMultipart
+from email.MIMEText import MIMEText
+from email.MIMEBase import MIMEBase
+from email import encoders
+
+print("Imported Libraries...")
+
+#Setup GPIO pins
+GPIO.setmode(GPIO.BCM)
+
+GPIO_TRIGGER = 25
+GPIO_ECHO = 18
+
+GPIO.setup(GPIO_TRIGGER, GPIO.OUT)
+GPIO.setup(GPIO_ECHO, GPIO.IN)
+
+
+#function that returns distance
+def distance():
+    #set trigger now
+    GPIO.output(GPIO_TRIGGER, True)
+    
+    #wait .01ms then turn off trigger
+    time.sleep(.00001)
+    GPIO.output(GPIO_TRIGGER, False)
+    
+    StartTime = time.time()
+    StopTime = time.time()
+    
+    #save start time
+    while GPIO.input (GPIO_ECHO) == 0:
+        StartTime = time.time()
+        
+    #save arrivale time
+    while GPIO.input (GPIO_ECHO) == 1:
+        StopTime = time.time()
+    
+    #Time difference between start and arrival
+    TimeElapsed = StopTime - StartTime
+    
+    #Multiply with sonic speed (34300 cm/s) then
+    #divide by 2 because you travel there and back
+    distance = (TimeElapsed*34300) / 2
+    
+    return distance
+
+def sendIt():
+    #return
+    print("Sending an alert...")
+
+    fromaddr = "we'lluseanotheremail@outlook.com"
+    toaddr = "we'lluseanotheremail@outlook.com"
+    msg = MIMEMultipart()
+    msg['From'] = fromaddr
+    msg['To'] = toaddr
+    msg['Subject'] = "Hey, your door is open!"
+
+    body = "The time this email was sent was "+ str(datetime.datetime.now()) + "\n Get to it, time's ticking."
+    msg.attach(MIMEText(body, 'plain'))
+    
+    #Time to send email!
+    os.chdir("/home/pi/Desktop/new/")
+    for file in glob.glob("*.jpg"):
+        filename = file
+        attachment = open("/home/pi/Desktop/new/"+file,"rb")
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload((attachment).read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', "attachment; filename= %s" % filename)
+        msg.attach(part)
+        
+    
+    server = smtplib.SMTP('smtp.office365.com', 587)
+    print("Made server object...")
+    
+    server.starttls()
+    print("Connected to server...")
+    
+    server.login(fromaddr, "we'lluseanotherpassword")
+    print("Logged into server...")
+    
+    text = msg.as_string()
+    print("Made message...")
+
+    server.sendmail(fromaddr, toaddr, text)
+    print("Sent mail.")
+    server.quit()
+
+    #Delete the pictures that were just sent
+    dir_name = "/home/pi/Desktop/new/"
+    test = os.listdir(dir_name)
+    for item in test:
+        if item.endswith(".jpg"):
+            os.remove(os.path.join(dir_name, item))
+    
+#Take a pic and save it to the "new" directory
+def snapIt(number):
+    camera = PiCamera()
+    camera.rotation = 180
+    camera.resolution = (960, 544)
+    camera.start_preview()
+    sleep(2)
+    camera.capture('/home/pi/Desktop/new/capped' + str(number) +'.jpg')
+    camera.stop_preview()
+    camera.close()
+    
+
+#Main program is a big loop
+if __name__ == '__main__':
+    try:
+        #Setup time now so we can use it for later
+        currentTime = time.time()
+        emailCooldownTime = time.time()
+        cameraCooldownTime = time.time()
+        
+        #Make flag for later
+        openDetect = False
+        
+        #make counter for camera
+        cameraNum = 1
+        delayAccount = 0
+        
+        while True:
+
+            #Get the distance measured by the ultrasonic sensor
+            #And the current time
+            dist = distance()
+            currentTime = time.time()
+            
+            if (dist < 20):
+                #If the distance is small, we know the door is open
+                print ("TIME: "+ str(currentTime))
+                print ("It's open at %.1f cm" % dist)
+                
+                #Take a pic every minute (60 secs).
+                #We know if it's been a minute using the camera cooldown timer
+                if ((currentTime - cameraCooldownTime) >= 60):
+                    print ("Taking Picture at: "+ str(currentTime))
+                    snapIt(cameraNum)
+                    cameraCooldownTime = time.time()
+                    cameraNum = cameraNum + 1
+                    delayAccout = cameraNum
+
+                #If this is the first detection of being open since being closed...
+                if (openDetect == False):
+                    #Grab the time the door was first detected
+                    originalDetectTime = time.time()
+                    openDetect = True
+                    print ("!!!!Open detected at: " + str(originalDetectTime))
+                
+                #else, check if 900 seconds have passed and add to log if it has
+                elif (openDetect == True and (currentTime - originalDetectTime)>=900):
+                    print("!!Open for more than 900 seconds")
+                    
+                    #Send an email every ten minutes (600 secs)
+                    #This one relies on the email cooldown timer
+                    if ((currentTime - emailCooldownTime) >= 600):
+                        print ("Sending Email at: "+ str(currentTime))
+                        sendIt()
+                        emailCooldownTime = time.time()
+                        cameraNum = 1
+
+            else:
+                print ("It's closed at %.1f cm" % dist)
+                
+                #Say the camera takes a picture every minute, and you get an email every 5 minutes
+                #If the camera has taken 7 pictures then you close the door, you'll only get the first 5.
+                #This will send the 2 leftover pics in such an event using the delay account variable
+                if (cameraNum != delayAccount and openDetect == True and (currentTime - originalDetectTime)>=900):
+                    print ("Sending Leftover pics...")
+                    sendIt()
+                    cameraNum = 1
+                    delayAccount = 1
+                else:
+                    cameraNum = 1
+                    delayAccount = 1
+                openDetect = False
+            
+            time.sleep(30)
+            print("________________________")
+            
+    #Stop by pressing ctrl C
+    except KeyboardInterrupt:
+        print("fine")
+        GPIO.cleanup
