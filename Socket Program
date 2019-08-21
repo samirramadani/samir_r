@@ -1,0 +1,64 @@
+#Client 
+import sys
+from socket import *
+# Get the server hostname, port and data length as command line arguments
+argv= sys.argv
+host = argv[1]
+port = argv[2]
+# Command line argument is a string, change the port and data length into
+integer
+port = int(port)
+client=True
+while client == True:
+# Initialize and print data to be sent
+data = input()
+# Create TCP client socket. Note the use of SOCK_STREAM for TCP packet
+clientSocket= socket(AF_INET, SOCK_STREAM)
+# Create TCP connection to server
+print("Connecting to " + host + ", " + str(port))
+clientSocket.connect((host, port))
+# Send data through TCP connection
+print("Sending data to server: " + data)
+clientSocket.send(data.encode())
+# Receive the server response
+dataEcho= clientSocket.recv(port)
+# Display the server response as an output
+print("Receive data from server: " +
+dataEcho.decode())
+# Close the client socket
+if(data=="bye"):
+client = False
+clientSocket.close()
+
+#Server
+from socket import *
+serverIP= '10.0.0.1'
+# any local IP address
+serverPort= 12000
+dataLen= 1000000
+# Create a TCP "welcoming" socket. Notice the use of SOCK_STREAM for TCP
+packets
+serverSocket= socket(AF_INET, SOCK_STREAM)
+# Assign IP address and port number to socket
+serverSocket.bind((serverIP, serverPort))
+# Listen for incoming connection requests
+serverSocket.listen(1)
+print('The server is ready to receive on port:' + str(serverPort))
+# loop forever listening for incoming connection requests on "welcoming"
+socket
+Server = True
+while Server == True:
+# Accept incoming connection requests, and allocate a new socket for data
+communication
+connectionSocket, address = serverSocket.accept()
+print("Socket created for client " + address[0] + ", " +
+str(address[1]))
+# Receive and print the client data in bytes from "data" socket
+data = connectionSocket.recv(dataLen).decode()
+data1 = "This is lab ece429"
+print("Data from client: " + data)
+# Echo back to client
+connectionSocket.send(data1.encode())
+if(data=="bye"):
+Server = False
+connectionSocket.close()
